@@ -1,0 +1,130 @@
+version: '3.8'
+
+services:
+  # 1. QUẢN LÝ LUỒNG (KAFKA & ZOOKEEPER)
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: uet-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: uet-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: uet-kafka-ui
+    depends_on:
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # 2. XỬ LÝ DỮ LIỆU (APACHE SPARK)
+  spark-master:
+    image: bitnami/spark:3.4.1
+    container_name: uet-spark-master
+    environment:
+      - SPARK_MODE=master
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+    ports:
+      - "8081:8081" # Spark Master UI
+      - "7077:7077"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  spark-worker:
+    image: bitnami/spark:3.4.1
+    container_name: uet-spark-worker
+    depends_on:
+      - spark-master
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=2G
+      - SPARK_WORKER_CORES=2
+    deploy:
+      resources:
+        limits:
+          memory: 2.5G # Spark cần RAM để thực thi tính toán
+
+  # 3. LƯU TRỮ LẠNH (MINIO - S3 OPEN SOURCE)
+  minio:
+    image: minio/minio
+    container_name: uet-minio
+    ports:
+      - "9000:9000" # API
+      - "9001:9001" # Console UI
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password123
+    command: server /data --console-address ":9001"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # 4. KHO PHÂN TÍCH NÓNG (CLICKHOUSE & METABASE)
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.8
+    container_name: uet-clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  metabase:
+    image: metabase/metabase:latest
+    container_name: uet-metabase
+    ports:
+      - "3000:3000"
+    volumes:
+      - metabase_data:/metabase-data
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+volumes:
+  clickhouse_data:
+  metabase_data:
+
+networks:
+  default:
+    name: uet-data-network
