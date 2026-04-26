@@ -122,40 +122,41 @@ def simulate_user_journey(producer, topic):
     """Giả lập 1 phiên hành vi của khách hàng với Phễu xác suất"""
     user = UserSession()
     
-    # 1. Luôn luôn bắt đầu bằng Page View
-    event = user.do_page_view()
-    producer.send(topic, event).add_errback(on_send_error)
-    
-    # 2. Xác suất 70% đi tìm tour (30% rớt phễu thoát trang)
-    if random.random() <= 0.70:
-        event = user.do_search()
-        producer.send(topic, event).add_errback(on_send_error)
+    try:
+        # 1. Luôn luôn bắt đầu bằng Page View
+        event = user.do_page_view()
+        producer.send(topic, value=event)
         
-        # 3. Xác suất 60% click vào xem chi tiết tour
-        if random.random() <= 0.60:
-            event = user.do_view_detail()
-            producer.send(topic, event).add_errback(on_send_error)
+        # 2. Xác suất 70% đi tìm tour (30% rớt phễu thoát trang)
+        if random.random() <= 0.70:
+            event = user.do_search()
+            producer.send(topic, value=event)
             
-            # 4. Xác suất 40% bấm nút Đặt Tour (Checkout)
-            if random.random() <= 0.40:
-                event = user.do_checkout()
-                producer.send(topic, event).add_errback(on_send_error)
-                # 5. Xác suất 80% thanh toán thành công (20% xót tiền bỏ giỏ hàng)
-                if random.random() <= 0.80:
-                    event = user.do_payment_success()
-                    producer.send(topic, event).add_errback(on_send_error)
-                    logger.info(f"💰 CHỐT ĐƠN: Khách {user.user_id} đã mua tour {user.tour_name}!")
+            # 3. Xác suất 60% click vào xem chi tiết tour
+            if random.random() <= 0.60:
+                event = user.do_view_detail()
+                producer.send(topic, value=event)
+                
+                # 4. Xác suất 40% bấm nút Đặt Tour (Checkout)
+                if random.random() <= 0.40:
+                    event = user.do_checkout()
+                    producer.send(topic, value=event)
+                    
+                    # 5. Xác suất 80% thanh toán thành công (20% xót tiền bỏ giỏ hàng)
+                    if random.random() <= 0.80:
+                        event = user.do_payment_success()
+                        producer.send(topic, value=event)
+                        logger.info(f"💰 CHỐT ĐƠN: Khách {user.user_id} đã mua tour {user.tour_name}!")
+                    else:
+                        logger.info(f"🛒 RỚT: Khách {user.user_id} bỏ giỏ hàng tour {user.tour_name}.")
                 else:
-                    logger.info(f"🛒 RỚT: Khách {user.user_id} bỏ giỏ hàng tour {user.tour_name}.")
+                    logger.info(f"👀 XEM: Khách {user.user_id} chỉ xem tour {user.tour_name} rồi thoát.")
             else:
-                logger.info(f"👀 XEM: Khách {user.user_id} chỉ xem tour {user.tour_name} rồi thoát.")
+                logger.info(f"🔍 TÌM KIẾM: Khách {user.user_id} tìm {user.search_destination} nhưng không ưng.")
         else:
-            logger.info(f"🔍 TÌM KIẾM: Khách {user.user_id} tìm {user.search_destination} nhưng không ưng.")
-    else:
-        logger.info(f"❌ THOÁT NHANH: Khách {user.user_id} vào trang chủ rồi thoát luôn.")
-
-except Exception as e:
-        # Bắt mọi lỗi xảy ra khi gửi và in ra thay vì làm sập chương trình
+            logger.info(f"❌ THOÁT NHANH: Khách {user.user_id} vào trang chủ rồi thoát luôn.")
+            
+    except Exception as e:
         logger.error(f"⚠️ LỖI GỬI DỮ LIỆU LÊN KAFKA: {e}")
 # ==========================================
 # 4. VÒNG LẶP CHẠY HỆ THỐNG
@@ -167,7 +168,9 @@ if __name__ == "__main__":
     producer = KafkaProducer(
         bootstrap_servers=[config.KAFKA_BROKER],
         # Tự động chuyển Dict Python thành chuỗi JSON và mã hóa UTF-8
-        value_serializer=lambda v: json.dumps(v).encode('utf-8')
+        value_serializer=lambda v: json.dumps(v).encode('utf-8'),
+
+        api_version=(2, 6, 0)
     )
     topic_name = config.KAFKA_TOPIC_NAME
     
