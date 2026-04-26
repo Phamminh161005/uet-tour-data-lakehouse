@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # 1. QUẢN LÝ LUỒNG (KAFKA & ZOOKEEPER)
   zookeeper:
@@ -11,7 +9,7 @@ services:
       resources:
         limits:
           memory: 256M
-
+ 
   kafka:
     image: confluentinc/cp-kafka:7.4.0
     container_name: uet-kafka
@@ -30,7 +28,7 @@ services:
       resources:
         limits:
           memory: 1G
-
+ 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     container_name: uet-kafka-ui
@@ -45,47 +43,44 @@ services:
       resources:
         limits:
           memory: 256M
-
+ 
   # 2. XỬ LÝ DỮ LIỆU (APACHE SPARK)
   spark-master:
-    image: bitnami/spark:3.4.1
+    image: apache/spark:3.5.1
     container_name: uet-spark-master
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
     environment:
-      - SPARK_MODE=master
-      - SPARK_RPC_AUTHENTICATION_ENABLED=no
-      - SPARK_RPC_ENCRYPTION_ENABLED=no
-      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
-      - SPARK_SSL_ENABLED=no
+      - SPARK_NO_DAEMONIZE=true
     ports:
-      - "8081:8081" # Spark Master UI
+      - "8081:8080"
       - "7077:7077"
     deploy:
       resources:
         limits:
           memory: 512M
-
+ 
   spark-worker:
-    image: bitnami/spark:3.4.1
+    image: apache/spark:3.5.1
     container_name: uet-spark-worker
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
     depends_on:
       - spark-master
     environment:
-      - SPARK_MODE=worker
-      - SPARK_MASTER_URL=spark://spark-master:7077
-      - SPARK_WORKER_MEMORY=2G
+      - SPARK_NO_DAEMONIZE=true
+      - SPARK_WORKER_MEMORY=2g
       - SPARK_WORKER_CORES=2
     deploy:
       resources:
         limits:
-          memory: 2.5G # Spark cần RAM để thực thi tính toán
-
+          memory: 2560M
+ 
   # 3. LƯU TRỮ LẠNH (MINIO - S3 OPEN SOURCE)
   minio:
     image: minio/minio
     container_name: uet-minio
     ports:
-      - "9000:9000" # API
-      - "9001:9001" # Console UI
+      - "9000:9000"
+      - "9001:9001"
     environment:
       MINIO_ROOT_USER: admin
       MINIO_ROOT_PASSWORD: password123
@@ -94,21 +89,21 @@ services:
       resources:
         limits:
           memory: 512M
-
+ 
   # 4. KHO PHÂN TÍCH NÓNG (CLICKHOUSE & METABASE)
   clickhouse:
     image: clickhouse/clickhouse-server:23.8
     container_name: uet-clickhouse
     ports:
       - "8123:8123"
-      - "9000:9000"
+      - "19000:9000"
     volumes:
       - clickhouse_data:/var/lib/clickhouse
     deploy:
       resources:
         limits:
           memory: 2G
-
+ 
   metabase:
     image: metabase/metabase:latest
     container_name: uet-metabase
@@ -116,15 +111,17 @@ services:
       - "3000:3000"
     volumes:
       - metabase_data:/metabase-data
+    environment:                
+      MB_DB_FILE: /metabase-data/metabase.db
     deploy:
       resources:
         limits:
           memory: 1G
-
+ 
 volumes:
   clickhouse_data:
   metabase_data:
-
+ 
 networks:
   default:
     name: uet-data-network
