@@ -4,6 +4,11 @@ from pyspark.sql.types import *
 
 spark = SparkSession.builder \
     .appName("KafkaSparkStreaming") \
+    .config("spark.hadoop.fs.s3a.endpoint", "http://minio:9000") \
+    .config("spark.hadoop.fs.s3a.access.key", "admin") \
+    .config("spark.hadoop.fs.s3a.secret.key", "password123") \
+    .config("spark.hadoop.fs.s3a.path.style.access", "true") \
+    .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
     .getOrCreate()
 
 # schema giống sample_data.json
@@ -34,7 +39,9 @@ df_clean = df_parsed.filter(
 
 # output ra console (test trước)
 query = df_clean.writeStream \
-    .format("console") \
+    .format("parquet") \
+    .option("path", "s3a://tour-data/events/") \
+    .option("checkpointLocation", "s3a://tour-data/checkpoints/") \
     .outputMode("append") \
     .start()
 
