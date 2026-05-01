@@ -1,0 +1,14 @@
+# Bỏ qua môi trường ảo (Đồng đội phải tự cài trên máy họ)
+venv/
+env/
+
+# Bỏ qua các file cache tự sinh của Python
+__pycache__/
+*.pyc
+
+# Bỏ qua file chứa mật khẩu, cấu hình nhạy cảm (Cực kỳ quan trọng)
+.env
+
+# Bỏ qua các file cấu hình của phần mềm code (VSCode, PyCharm)
+.vscode/
+.idea/
