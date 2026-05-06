@@ -7,7 +7,10 @@ from datetime import datetime, timedelta, timezone
 from faker import Faker
 from kafka import KafkaProducer
 
-# Import cấu hình từ file config.py của bạn (Bước 1.4)
+# ==========================================
+# 1. KHỞI TẠO CẤU HÌNH & LOGGING
+# ==========================================
+# Gọi cấu hình từ file config.py do bạn thiết kế
 import config
 
 # Cài đặt Hệ thống Logging chuẩn doanh nghiệp
@@ -21,7 +24,7 @@ logger = logging.getLogger(__name__)
 fake = Faker()
 
 # ==========================================
-# 1. KHO DỮ LIỆU MẪU
+# 2. KHO DỮ LIỆU MẪU
 # ==========================================
 DESTINATIONS = ["Sapa", "Ha Giang", "Halong", "Ninh Binh", "Danang", "Dalat", "Phu Quoc"]
 TOUR_CATALOG = {
@@ -31,12 +34,13 @@ TOUR_CATALOG = {
 }
 
 # ==========================================
-# 2. CLASS QUẢN LÝ PHIÊN KHÁCH HÀNG
+# 3. CLASS QUẢN LÝ PHIÊN KHÁCH HÀNG
 # ==========================================
 class UserSession:
     def __init__(self):
-        self.session_id = f"S-{uuid.uuid4().hex[:10]}"
-        self.user_id = f"U-{fake.random_number(digits=5, fix_len=True)}"
+        # Sử dụng config.NODE_ID để chống trùng lặp dữ liệu
+        self.session_id = f"S_{config.NODE_ID}_{uuid.uuid4().hex[:10]}"
+        self.user_id = f"U_{config.NODE_ID}_{fake.random_number(digits=5, fix_len=True)}"
         self.platform = "web"
         self.device_type = random.choice(["desktop", "mobile"])
         self.device_os = random.choice(["Windows", "MacOS"]) if self.device_type == "desktop" else random.choice(["Android", "iOS"])
@@ -58,7 +62,9 @@ class UserSession:
 
     def _build_event(self, event_type):
         return {
-            "event_id": f"evt_{uuid.uuid4().hex[:12]}", "timestamp": self.current_time.isoformat(),
+            # Khóa chính (Primary Key) an toàn khi đẩy vào ClickHouse
+            "event_id": f"evt_{config.NODE_ID}_{uuid.uuid4().hex[:12]}", 
+            "timestamp": self.current_time.isoformat(),
             "user_id": self.user_id, "session_id": self.session_id, "event_type": event_type,
             "platform": self.platform, "device_os": self.device_os, "device_browser": self.device_browser,
             "device_type": self.device_type, "geo_ip": self.geo_ip, "geo_country": self.geo_country,
@@ -107,88 +113,74 @@ class UserSession:
 
 
 # ==========================================
-# 3. KAFKA PRODUCER & LOGIC ĐIỀU PHỐI (CORE BƯỚC 3)
+# 4. KAFKA PRODUCER & LOGIC ĐIỀU PHỐI
 # ==========================================
 
 def delivery_report(err, msg):
-    """Hàm Callback: Được gọi khi Kafka nhận được JSON hoặc xảy ra lỗi"""
     if err is not None:
         logger.error(f"Giao hàng thất bại: {err}")
     else:
-        # Tắt log này đi nếu gửi quá nhanh để tránh rác màn hình, nhưng hiện tại cứ để để quan sát
         pass 
 
 def simulate_user_journey(producer, topic):
-    """Giả lập 1 phiên hành vi của khách hàng với Phễu xác suất"""
     user = UserSession()
     
     try:
-        # 1. Luôn luôn bắt đầu bằng Page View
         event = user.do_page_view()
         producer.send(topic, value=event)
         
-        # 2. Xác suất 70% đi tìm tour (30% rớt phễu thoát trang)
         if random.random() <= 0.70:
             event = user.do_search()
             producer.send(topic, value=event)
             
-            # 3. Xác suất 60% click vào xem chi tiết tour
             if random.random() <= 0.60:
                 event = user.do_view_detail()
                 producer.send(topic, value=event)
                 
-                # 4. Xác suất 40% bấm nút Đặt Tour (Checkout)
                 if random.random() <= 0.40:
                     event = user.do_checkout()
                     producer.send(topic, value=event)
                     
-                    # 5. Xác suất 80% thanh toán thành công (20% xót tiền bỏ giỏ hàng)
                     if random.random() <= 0.80:
                         event = user.do_payment_success()
                         producer.send(topic, value=event)
-                        logger.info(f"💰 CHỐT ĐƠN: Khách {user.user_id} đã mua tour {user.tour_name}!")
+                        logger.info(f"💰 [TRẠM {config.NODE_ID}] CHỐT ĐƠN: Khách {user.user_id} đã mua tour {user.tour_name}!")
                     else:
-                        logger.info(f"🛒 RỚT: Khách {user.user_id} bỏ giỏ hàng tour {user.tour_name}.")
+                        logger.info(f"🛒 [TRẠM {config.NODE_ID}] RỚT: Khách {user.user_id} bỏ giỏ hàng tour {user.tour_name}.")
                 else:
-                    logger.info(f"👀 XEM: Khách {user.user_id} chỉ xem tour {user.tour_name} rồi thoát.")
+                    logger.info(f"👀 [TRẠM {config.NODE_ID}] XEM: Khách {user.user_id} chỉ xem tour {user.tour_name} rồi thoát.")
             else:
-                logger.info(f"🔍 TÌM KIẾM: Khách {user.user_id} tìm {user.search_destination} nhưng không ưng.")
+                logger.info(f"🔍 [TRẠM {config.NODE_ID}] TÌM KIẾM: Khách {user.user_id} tìm {user.search_destination} nhưng không ưng.")
         else:
-            logger.info(f"❌ THOÁT NHANH: Khách {user.user_id} vào trang chủ rồi thoát luôn.")
+            logger.info(f"❌ [TRẠM {config.NODE_ID}] THOÁT NHANH: Khách {user.user_id} vào trang chủ rồi thoát luôn.")
             
     except Exception as e:
         logger.error(f"⚠️ LỖI GỬI DỮ LIỆU LÊN KAFKA: {e}")
+
 # ==========================================
-# 4. VÒNG LẶP CHẠY HỆ THỐNG
+# 5. VÒNG LẶP CHẠY HỆ THỐNG
 # ==========================================
 if __name__ == "__main__":
-    logger.info("Khởi động Máy phát dữ liệu (Data Generator)...")
+    logger.info(f"Khởi động Trạm phát dữ liệu - Định danh: {config.NODE_ID}")
     
-    # Khởi tạo Kafka Producer với cấu hình từ file config.py
+    # Kết nối sử dụng biến từ config.py
     producer = KafkaProducer(
         bootstrap_servers=[config.KAFKA_BROKER],
-        # Tự động chuyển Dict Python thành chuỗi JSON và mã hóa UTF-8
         value_serializer=lambda v: json.dumps(v).encode('utf-8'),
-
         api_version=(2, 6, 0)
     )
-    topic_name = config.KAFKA_TOPIC_NAME
     
-    logger.info(f"Đã kết nối Kafka Broker: {config.KAFKA_BROKER}")
-    logger.info(f"Bắt đầu bắn dữ liệu vào Topic: {topic_name}")
+    logger.info(f"Đã kết nối Kafka Broker tại: {config.KAFKA_BROKER}")
+    logger.info(f"Bắt đầu bơm dữ liệu vào Topic: {config.KAFKA_TOPIC_NAME}")
     
     try:
-        # Vòng lặp vô hạn sinh dữ liệu
         while True:
-            simulate_user_journey(producer, topic_name)
-            
-            # Đợi 1 - 3 giây rồi sinh khách hàng tiếp theo (Tránh quá tải máy)
+            simulate_user_journey(producer, config.KAFKA_TOPIC_NAME)
             time.sleep(random.uniform(1.0, 3.0))
             
     except KeyboardInterrupt:
         logger.info("Đã nhận lệnh Dừng (Ctrl+C). Đang dọn dẹp hệ thống...")
     finally:
-        # Bắt buộc phải Flush (Đẩy nốt hàng tồn đọng) trước khi tắt
         logger.info("Đang chờ Kafka gửi nốt các bản tin cuối cùng...")
         producer.flush()
         logger.info("Đã tắt an toàn!")
