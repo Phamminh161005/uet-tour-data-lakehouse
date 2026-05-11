@@ -70,6 +70,7 @@ def extract_and_transform_stream(spark: SparkSession, kafka_broker: str, topic: 
         .format("kafka") \
         .option("kafka.bootstrap.servers", kafka_broker) \
         .option("subscribe", topic) \
+        .option("failOnDataLoss", "false") \
         .load()
 
     df_value = df_raw.selectExpr("CAST(value AS STRING)")
@@ -157,10 +158,10 @@ def main():
     print(f"[{config.NODE_ID}] Kích hoạt Data Stream. Nhấn Ctrl+C để dừng...")
     query = streaming_df.writeStream \
         .foreachBatch(process_batch_sink) \
-        .option("checkpointLocation", "s3a://raw-tour-data/checkpoints/streaming_job/") \
+        .option("checkpointLocation", f"s3a://raw-tour-data/checkpoints/streaming_job_{config.NODE_ID}/") \
+        .option("failOnDataLoss", "false") \
         .outputMode("append") \
         .start()
-
     query.awaitTermination()
 
 if __name__ == "__main__":
