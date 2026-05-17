@@ -185,7 +185,47 @@ def simulate_user_journey(producer, topic):
         logger.error(f"⚠️ LỖI GỬI DỮ LIỆU LÊN KAFKA: {e}")
 
 # ==========================================
-# 5. VÒNG LẶP CHẠY HỆ THỐNG
+# 5. HÀM GIẢ LẬP TẤN CÔNG BOT (TV3 - FRAUD DETECTION)
+# ==========================================
+
+def generate_random_event() -> dict:
+    """Tạo một sự kiện ngẫu nhiên đơn lẻ (dùng cho bot attack)."""
+    user = UserSession()
+    return user.do_page_view()
+
+def simulate_bot_attack(producer, topic: str):
+    """
+    Giả lập một cuộc tấn công Bot:
+    - Cố định IP = 192.168.99.99
+    - Bắn 60 sự kiện liên tục không nghỉ vào Kafka
+    - Đủ để vượt ngưỡng 50 event/phút của fraud_job.py
+    """
+    BOT_IP = "192.168.99.99"
+    BOT_EVENT_COUNT = 60  # > 50 → sẽ bị phát hiện bởi Spark
+
+    logger.warning(f"🚨 [TRẠM {config.NODE_ID}] CẢNH BÁO: Bot {BOT_IP} đang tấn công mạng!")
+
+    start_time = datetime.now(timezone.utc)
+    for i in range(BOT_EVENT_COUNT):
+        bot_event = generate_random_event()
+        bot_event["geo_ip"] = BOT_IP  # Ghi đè IP thành địa chỉ của Bot
+        bot_event["event_type"] = "page_view"  # Bot chỉ spam page_view
+        
+        # TẠO TIMESTAMP TĂNG DẦN CHO BOT
+        # Giả lập 60 event trong vòng 30 giây -> 1 event mỗi 0.5 giây
+        bot_event["timestamp"] = (start_time + timedelta(seconds=i * 0.5)).isoformat()
+
+        try:
+            producer.send(topic, value=bot_event)
+        except Exception as e:
+            logger.error(f"⚠️ Lỗi gửi bot event #{i+1}: {e}")
+
+    producer.flush()  # Đảm bảo toàn bộ 60 event được gửi ngay lập tức
+    logger.warning(f"🚨 [TRẠM {config.NODE_ID}] Bot đã bắn xong {BOT_EVENT_COUNT} sự kiện từ IP {BOT_IP}!")
+
+
+# ==========================================
+# 6. VÒNG LẶP CHẠY HỆ THỐNG
 # ==========================================
 if __name__ == "__main__":
     logger.info(f"Khởi động Trạm phát dữ liệu - Định danh: {config.NODE_ID}")
@@ -199,9 +239,24 @@ if __name__ == "__main__":
     
     logger.info(f"Đã kết nối Kafka Broker tại: {config.KAFKA_BROKER}")
     logger.info(f"Bắt đầu bơm dữ liệu vào Topic: {config.KAFKA_TOPIC_NAME}")
-    
+
+    # ── Xác suất kích hoạt Bot mỗi vòng lặp ──────────────────────────
+    # Cứ ~10 lần gửi dữ liệu bình thường thì có 1 lần Bot xuất hiện
+    BOT_ATTACK_PROBABILITY = 0.10  # 10%
+
     try:
+        loop_count = 0
         while True:
+            loop_count += 1
+            # Mỗi vòng: 10% cơ hội xuất hiện Bot
+            if random.random() < BOT_ATTACK_PROBABILITY:
+                logger.info(f"--- Vòng #{loop_count}: Bot được triệu hồi! ---")
+                simulate_bot_attack(producer, config.KAFKA_TOPIC_NAME)
+                # Sau đợt tấn công, nghỉ ngắn để tránh Kafka quá tải
+                time.sleep(random.uniform(2.0, 4.0))
+            else:
+                simulate_user_journey(producer, config.KAFKA_TOPIC_NAME)
+                time.sleep(random.uniform(1.0, 3.0))
             
             # Có 2% cơ hội (hoặc khoảng 1-2 phút 1 lần) xảy ra sự kiện Flash Sale kéo dài 30 giây
             if time.time() > FLASH_SALE_END_TIME and random.random() < 0.02:

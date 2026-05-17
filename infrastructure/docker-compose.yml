@@ -24,46 +24,16 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"  
     deploy:
       resources:
         limits:
           memory: 1G
-
-  # TẠO KAFKA TOPIC TỰ ĐỘNG VỚI 3 PARTITION
-  kafka-topic-creator:
-    image: confluentinc/cp-kafka:7.4.0
-    container_name: uet-kafka-topic-creator
-    depends_on:
-      - kafka
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        echo "⏳ Đang chờ Kafka sẵn sàng..."
-        cub kafka-ready -b kafka:29092 1 60
-        echo " Kafka đã sẵn sàng!"
-
-        kafka-topics --create \
-          --topic tour_events \
-          --bootstrap-server kafka:29092 \
-          --partitions 3 \
-          --replication-factor 1 \
-          --if-not-exists
-
-        echo " Hoàn tất!"
-        kafka-topics --describe \
-          --topic tour_events \
-          --bootstrap-server kafka:29092
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-
+ 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     container_name: uet-kafka-ui
     depends_on:
-      - kafka-topic-creator
+      - kafka
     ports:
       - "8080:8080"
     environment:
@@ -74,7 +44,37 @@ services:
         limits:
           memory: 256M
  
-  # 2. LƯU TRỮ LẠNH (MINIO - S3 OPEN SOURCE)
+  # 2. XỬ LÝ DỮ LIỆU (APACHE SPARK)
+  spark-master:
+    image: apache/spark:3.5.1
+    container_name: uet-spark-master
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
+    environment:
+      - SPARK_NO_DAEMONIZE=true
+    ports:
+      - "8081:8080"
+      - "7077:7077"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+ 
+  spark-worker:
+    image: apache/spark:3.5.1
+    container_name: uet-spark-worker
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
+    depends_on:
+      - spark-master
+    environment:
+      - SPARK_NO_DAEMONIZE=true
+      - SPARK_WORKER_MEMORY=2g
+      - SPARK_WORKER_CORES=2
+    deploy:
+      resources:
+        limits:
+          memory: 2560M
+ 
+  # 3. LƯU TRỮ LẠNH (MINIO - S3 OPEN SOURCE)
   minio:
     image: minio/minio
     container_name: uet-minio
@@ -90,7 +90,7 @@ services:
         limits:
           memory: 512M
  
-  # 3. KHO PHÂN TÍCH NÓNG (CLICKHOUSE & METABASE)
+  # 4. KHO PHÂN TÍCH NÓNG (CLICKHOUSE & METABASE)
   clickhouse:
     image: clickhouse/clickhouse-server:23.8
     container_name: uet-clickhouse
@@ -113,7 +113,6 @@ services:
       - metabase_data:/metabase-data
     environment:                
       MB_DB_FILE: /metabase-data/metabase.db
-      JAVA_OPTS: "-Xmx512m -Xms256m"
     deploy:
       resources:
         limits:
