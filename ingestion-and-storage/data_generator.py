@@ -168,7 +168,8 @@ def simulate_user_journey(producer, topic):
                     event = user.do_checkout()
                     producer.send(topic, value=event)
                     
-                    if random.random() <= 0.80:
+                    # Tỷ lệ chốt đơn giả định là 30% sau khi vào trang thanh toán, 70% dropoff
+                    if random.random() <= 0.30:
                         event = user.do_payment_success()
                         producer.send(topic, value=event)
                         logger.info(f"💰 [TRẠM {config.NODE_ID}] CHỐT ĐƠN: Khách {user.user_id} đã mua tour {user.tour_name}!")
