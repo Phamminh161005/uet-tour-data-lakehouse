@@ -33,9 +33,9 @@ services:
     image: provectuslabs/kafka-ui:latest
     container_name: uet-kafka-ui
     depends_on:
-      - kafka-topic-creator
+      - kafka
     ports:
-      - "8088:8080"
+      - "8080:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
@@ -46,29 +46,21 @@ services:
  
   # 2. XỬ LÝ DỮ LIỆU (APACHE SPARK)
   spark-master:
-    build:
-      context: ../spark-processing
-      dockerfile: Dockerfile
+    image: apache/spark:3.5.1
     container_name: uet-spark-master
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
-    depends_on:
-      - kafka-topic-creator
     environment:
       - SPARK_NO_DAEMONIZE=true
     ports:
       - "8081:8080"
       - "7077:7077"
-    volumes:
-      - ../spark-processing:/opt/spark/work-dir
     deploy:
       resources:
         limits:
           memory: 512M
  
   spark-worker:
-    build:
-      context: ../spark-processing
-      dockerfile: Dockerfile
+    image: apache/spark:3.5.1
     container_name: uet-spark-worker
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
     depends_on:
@@ -77,8 +69,6 @@ services:
       - SPARK_NO_DAEMONIZE=true
       - SPARK_WORKER_MEMORY=2g
       - SPARK_WORKER_CORES=2
-    volumes:
-      - ../spark-processing:/opt/spark/work-dir
     deploy:
       resources:
         limits:
@@ -118,7 +108,7 @@ services:
     image: metabase/metabase:latest
     container_name: uet-metabase
     ports:
-      - "3001:3000"
+      - "3000:3000"
     volumes:
       - metabase_data:/metabase-data
     environment:                
@@ -128,38 +118,10 @@ services:
         limits:
           memory: 1G
  
-  # 5. BƠM DỮ LIỆU (DATA GENERATOR)
-  data-generator:
-    build:
-      context: ../ingestion-and-storage
-      dockerfile: Dockerfile
-    container_name: uet-data-generator
-    depends_on:
-      - kafka-topic-creator
-    command: ["./wait-for-it.sh", "kafka:29092", "python", "data_generator.py"]
-    deploy:
-      resources:
-        limits:
-          memory: 256M
- 
-  # 6. KAFKA TOPIC CREATOR
-  kafka-topic-creator:
-    image: confluentinc/cp-kafka:7.3.0
-    depends_on:
-      - kafka
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        echo "Waiting for Kafka to be ready..."
-        cub kafka-ready -b kafka:29092 1 30
-        echo "Kafka is ready!"
-        kafka-topics --create --topic tour_events --bootstrap-server kafka:29092 --partitions 1 --replication-factor 1
-        echo "Topic tour_events created!"
-
-networks:
-  default:
-    name: uet-data-network
-
 volumes:
   clickhouse_data:
   metabase_data:
+ 
+networks:
+  default:
+    name: uet-data-network

@@ -1,4 +1,5 @@
 # Bỏ qua môi trường ảo (Đồng đội phải tự cài trên máy họ)
+checkpoints/
 venv/
 env/
 
