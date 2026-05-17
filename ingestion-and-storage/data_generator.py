@@ -26,12 +26,29 @@ fake = Faker()
 # ==========================================
 # 2. KHO DỮ LIỆU MẪU
 # ==========================================
-DESTINATIONS = ["Sapa", "Ha Giang", "Halong", "Ninh Binh", "Danang", "Dalat", "Phu Quoc"]
+TRENDING_CONFIG = {
+    "Sapa": 28,       # Ứng cử viên số 1
+    "Dalat": 25,      # Bám rất sát Sapa
+    "Danang": 22,     # Ngựa ô, sẵn sàng vượt lên nếu nhiều người bấm Payment
+    "Halong": 15,     # Tầm trung, thỉnh thoảng lọt Top 3
+    "Ha Giang": 4,    
+    "Ninh Binh": 3,
+    "Phu Quoc": 3
+}
+
+CURRENT_FLASH_SALE_DEST = None
+FLASH_SALE_END_TIME = 0
+
 TOUR_CATALOG = {
     "Sapa": [{"id": "T-SAPA-01", "name": "Sapa Misty Morning", "price": 3500000}],
     "Halong": [{"id": "T-HL-01", "name": "Halong Luxury Cruise", "price": 4500000}],
-    "Dalat": [{"id": "T-DL-01", "name": "Dalat Pine Forest", "price": 3000000}]
+    "Dalat": [{"id": "T-DL-01", "name": "Dalat Pine Forest", "price": 3000000}],
+    "Ha Giang": [{"id": "T-HG-01", "name": "Ha Giang Loop Adventure", "price": 4000000}],
+    "Ninh Binh": [{"id": "T-NB-01", "name": "Ninh Binh Trang An", "price": 1500000}],
+    "Danang": [{"id": "T-DN-01", "name": "Danang Ba Na Hills", "price": 2500000}],
+    "Phu Quoc": [{"id": "T-PQ-01", "name": "Phu Quoc Island Escape", "price": 5500000}]
 }
+
 
 # ==========================================
 # 3. CLASS QUẢN LÝ PHIÊN KHÁCH HÀNG
@@ -83,7 +100,17 @@ class UserSession:
     def do_search(self):
         self._advance_time(15, 60)
         self.referrer_url = self.current_url
-        self.search_destination = random.choice(DESTINATIONS)
+
+        global CURRENT_FLASH_SALE_DEST, FLASH_SALE_END_TIME
+        
+        # Nếu đang trong thời gian Giờ Vàng, 80% khách hàng sẽ đổ xô vào Tour đang giảm giá
+        if time.time() < FLASH_SALE_END_TIME and random.random() < 0.8:
+            self.search_destination = CURRENT_FLASH_SALE_DEST
+        else:
+            # Nếu không, dùng trọng số bình thường
+            dests = list(TRENDING_CONFIG.keys())
+            weights = list(TRENDING_CONFIG.values())
+            self.search_destination = random.choices(dests, weights=weights, k=1)[0]
         self.search_guests = random.randint(1, 5)
         self.search_min_budget = random.choice([0, 1000000])
         self.search_max_budget = self.search_min_budget + random.choice([2000000, 5000000])
@@ -175,8 +202,16 @@ if __name__ == "__main__":
     
     try:
         while True:
+            
+            # Có 2% cơ hội (hoặc khoảng 1-2 phút 1 lần) xảy ra sự kiện Flash Sale kéo dài 30 giây
+            if time.time() > FLASH_SALE_END_TIME and random.random() < 0.02:
+                # Chọn một tour ngẫu nhiên ở nhóm đáy bảng để bơm traffic
+                CURRENT_FLASH_SALE_DEST = random.choice(["Phu Quoc", "Ninh Binh", "Ha Giang"])
+                FLASH_SALE_END_TIME = time.time() + 30 # Sự kiện kéo dài 30 giây
+                logger.warning(f"🚀 [FLASH SALE] Bùng nổ traffic! Giảm giá 50% cho tour {CURRENT_FLASH_SALE_DEST} trong 30 giây tới!")
+            
             simulate_user_journey(producer, config.KAFKA_TOPIC_NAME)
-            time.sleep(random.uniform(1.0, 3.0))
+            time.sleep(random.uniform(0.8, 2.0))
             
     except KeyboardInterrupt:
         logger.info("Đã nhận lệnh Dừng (Ctrl+C). Đang dọn dẹp hệ thống...")
