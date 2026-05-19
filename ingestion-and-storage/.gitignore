@@ -1,6 +1,7 @@
 # Bỏ qua môi trường ảo (Đồng đội phải tự cài trên máy họ)
 venv/
 env/
+checkpoints/
 
 # Bỏ qua các file cache tự sinh của Python
 __pycache__/

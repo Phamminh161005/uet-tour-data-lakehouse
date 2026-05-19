@@ -26,12 +26,29 @@ fake = Faker()
 # ==========================================
 # 2. KHO DỮ LIỆU MẪU
 # ==========================================
-DESTINATIONS = ["Sapa", "Ha Giang", "Halong", "Ninh Binh", "Danang", "Dalat", "Phu Quoc"]
+TRENDING_CONFIG = {
+    "Sapa": 28,       # Ứng cử viên số 1
+    "Dalat": 25,      # Bám rất sát Sapa
+    "Danang": 22,     # Ngựa ô, sẵn sàng vượt lên nếu nhiều người bấm Payment
+    "Halong": 15,     # Tầm trung, thỉnh thoảng lọt Top 3
+    "Ha Giang": 4,    
+    "Ninh Binh": 3,
+    "Phu Quoc": 3
+}
+
+CURRENT_FLASH_SALE_DEST = None
+FLASH_SALE_END_TIME = 0
+
 TOUR_CATALOG = {
     "Sapa": [{"id": "T-SAPA-01", "name": "Sapa Misty Morning", "price": 3500000}],
     "Halong": [{"id": "T-HL-01", "name": "Halong Luxury Cruise", "price": 4500000}],
-    "Dalat": [{"id": "T-DL-01", "name": "Dalat Pine Forest", "price": 3000000}]
+    "Dalat": [{"id": "T-DL-01", "name": "Dalat Pine Forest", "price": 3000000}],
+    "Ha Giang": [{"id": "T-HG-01", "name": "Ha Giang Loop Adventure", "price": 4000000}],
+    "Ninh Binh": [{"id": "T-NB-01", "name": "Ninh Binh Trang An", "price": 1500000}],
+    "Danang": [{"id": "T-DN-01", "name": "Danang Ba Na Hills", "price": 2500000}],
+    "Phu Quoc": [{"id": "T-PQ-01", "name": "Phu Quoc Island Escape", "price": 5500000}]
 }
+
 
 # ==========================================
 # 3. CLASS QUẢN LÝ PHIÊN KHÁCH HÀNG
@@ -83,7 +100,17 @@ class UserSession:
     def do_search(self):
         self._advance_time(15, 60)
         self.referrer_url = self.current_url
-        self.search_destination = random.choice(DESTINATIONS)
+
+        global CURRENT_FLASH_SALE_DEST, FLASH_SALE_END_TIME
+        
+        # Nếu đang trong thời gian Giờ Vàng, 80% khách hàng sẽ đổ xô vào Tour đang giảm giá
+        if time.time() < FLASH_SALE_END_TIME and random.random() < 0.8:
+            self.search_destination = CURRENT_FLASH_SALE_DEST
+        else:
+            # Nếu không, dùng trọng số bình thường
+            dests = list(TRENDING_CONFIG.keys())
+            weights = list(TRENDING_CONFIG.values())
+            self.search_destination = random.choices(dests, weights=weights, k=1)[0]
         self.search_guests = random.randint(1, 5)
         self.search_min_budget = random.choice([0, 1000000])
         self.search_max_budget = self.search_min_budget + random.choice([2000000, 5000000])
@@ -141,7 +168,8 @@ def simulate_user_journey(producer, topic):
                     event = user.do_checkout()
                     producer.send(topic, value=event)
                     
-                    if random.random() <= 0.80:
+                    # Tỷ lệ chốt đơn giả định là 30% sau khi vào trang thanh toán, 70% dropoff
+                    if random.random() <= 0.30:
                         event = user.do_payment_success()
                         producer.send(topic, value=event)
                         logger.info(f"💰 [TRẠM {config.NODE_ID}] CHỐT ĐƠN: Khách {user.user_id} đã mua tour {user.tour_name}!")
@@ -158,7 +186,47 @@ def simulate_user_journey(producer, topic):
         logger.error(f"⚠️ LỖI GỬI DỮ LIỆU LÊN KAFKA: {e}")
 
 # ==========================================
-# 5. VÒNG LẶP CHẠY HỆ THỐNG
+# 5. HÀM GIẢ LẬP TẤN CÔNG BOT (TV3 - FRAUD DETECTION)
+# ==========================================
+
+def generate_random_event() -> dict:
+    """Tạo một sự kiện ngẫu nhiên đơn lẻ (dùng cho bot attack)."""
+    user = UserSession()
+    return user.do_page_view()
+
+def simulate_bot_attack(producer, topic: str):
+    """
+    Giả lập một cuộc tấn công Bot:
+    - Cố định IP = 192.168.99.99
+    - Bắn 60 sự kiện liên tục không nghỉ vào Kafka
+    - Đủ để vượt ngưỡng 50 event/phút của fraud_job.py
+    """
+    BOT_IP = "192.168.99.99"
+    BOT_EVENT_COUNT = 60  # > 50 → sẽ bị phát hiện bởi Spark
+
+    logger.warning(f"🚨 [TRẠM {config.NODE_ID}] CẢNH BÁO: Bot {BOT_IP} đang tấn công mạng!")
+
+    start_time = datetime.now(timezone.utc)
+    for i in range(BOT_EVENT_COUNT):
+        bot_event = generate_random_event()
+        bot_event["geo_ip"] = BOT_IP  # Ghi đè IP thành địa chỉ của Bot
+        bot_event["event_type"] = "page_view"  # Bot chỉ spam page_view
+        
+        # TẠO TIMESTAMP TĂNG DẦN CHO BOT
+        # Giả lập 60 event trong vòng 30 giây -> 1 event mỗi 0.5 giây
+        bot_event["timestamp"] = (start_time + timedelta(seconds=i * 0.5)).isoformat()
+
+        try:
+            producer.send(topic, value=bot_event)
+        except Exception as e:
+            logger.error(f"⚠️ Lỗi gửi bot event #{i+1}: {e}")
+
+    producer.flush()  # Đảm bảo toàn bộ 60 event được gửi ngay lập tức
+    logger.warning(f"🚨 [TRẠM {config.NODE_ID}] Bot đã bắn xong {BOT_EVENT_COUNT} sự kiện từ IP {BOT_IP}!")
+
+
+# ==========================================
+# 6. VÒNG LẶP CHẠY HỆ THỐNG
 # ==========================================
 if __name__ == "__main__":
     logger.info(f"Khởi động Trạm phát dữ liệu - Định danh: {config.NODE_ID}")
@@ -172,11 +240,34 @@ if __name__ == "__main__":
     
     logger.info(f"Đã kết nối Kafka Broker tại: {config.KAFKA_BROKER}")
     logger.info(f"Bắt đầu bơm dữ liệu vào Topic: {config.KAFKA_TOPIC_NAME}")
-    
+
+    # ── Xác suất kích hoạt Bot mỗi vòng lặp ──────────────────────────
+    # Cứ ~10 lần gửi dữ liệu bình thường thì có 1 lần Bot xuất hiện
+    BOT_ATTACK_PROBABILITY = 0.10  # 10%
+
     try:
+        loop_count = 0
         while True:
+            loop_count += 1
+            # Mỗi vòng: 10% cơ hội xuất hiện Bot
+            if random.random() < BOT_ATTACK_PROBABILITY:
+                logger.info(f"--- Vòng #{loop_count}: Bot được triệu hồi! ---")
+                simulate_bot_attack(producer, config.KAFKA_TOPIC_NAME)
+                # Sau đợt tấn công, nghỉ ngắn để tránh Kafka quá tải
+                time.sleep(random.uniform(2.0, 4.0))
+            else:
+                simulate_user_journey(producer, config.KAFKA_TOPIC_NAME)
+                time.sleep(random.uniform(1.0, 3.0))
+            
+            # Có 2% cơ hội (hoặc khoảng 1-2 phút 1 lần) xảy ra sự kiện Flash Sale kéo dài 30 giây
+            if time.time() > FLASH_SALE_END_TIME and random.random() < 0.02:
+                # Chọn một tour ngẫu nhiên ở nhóm đáy bảng để bơm traffic
+                CURRENT_FLASH_SALE_DEST = random.choice(["Phu Quoc", "Ninh Binh", "Ha Giang"])
+                FLASH_SALE_END_TIME = time.time() + 30 # Sự kiện kéo dài 30 giây
+                logger.warning(f"🚀 [FLASH SALE] Bùng nổ traffic! Giảm giá 50% cho tour {CURRENT_FLASH_SALE_DEST} trong 30 giây tới!")
+            
             simulate_user_journey(producer, config.KAFKA_TOPIC_NAME)
-            time.sleep(random.uniform(1.0, 3.0))
+            time.sleep(random.uniform(0.8, 2.0))
             
     except KeyboardInterrupt:
         logger.info("Đã nhận lệnh Dừng (Ctrl+C). Đang dọn dẹp hệ thống...")
